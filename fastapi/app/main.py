@@ -1,3 +1,4 @@
+import httpx
 import os
 import json
 import logging
@@ -10,10 +11,13 @@ from .functions import (
     get_access_token,
     fetch_profile, fetch_heartrate, fetch_sleep_date, fetch_sleep_list,
     fetch_activity_date, fetch_activity_heart_zones,
-    fetch_eda, fetch_spo2, fetch_skin_temp,
     gemini_diagnose
 )
 from langgraph.graph import StateGraph, END
+
+from .auth import create_jwt_token, decode_jwt_token
+from .functions import run_langgraph_analysis
+
 
 # ロギング設定
 type_logging = logging.getLogger("fitbit_ai")
@@ -33,30 +37,55 @@ TOKEN_PATH = os.path.join(BASE_DIR, "token.json")
 
 type_logging.debug(f"WORKDIR={BASE_DIR}, token path={TOKEN_PATH}")
 
-# 1. 認証エンドポイント
 @app.get("/")
-def authorize():
-    params = {
-        "response_type": "code",
-        "client_id": CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "scope": "activity heartrate sleep temperature weight location nutrition profile",
-        "expires_in": "604800"
-    }
-    url = f"https://www.fitbit.com/oauth2/authorize?{urlencode(params)}"
-    type_logging.debug(f"Redirecting to Fitbit auth: {url}")
-    return RedirectResponse(url)
+def root():
+    return {"message": "FastAPI is running."}
 
-# 2. コールバック
+@app.get("/login")
+async def login():
+    return RedirectResponse(
+        url=f"https://www.fitbit.com/oauth2/authorize?response_type=code&client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=profile%20activity%20sleep%20heartrate%20temperature"
+    )
+
 @app.get("/callback")
-async def callback(request: Request):
-    code = request.query_params.get("code")
-    if not code:
-        raise HTTPException(status_code=400, detail="認可コードがありません")
-    type_logging.debug(f"Callback code={code}")
-    token_data = await get_access_token(code)
-    type_logging.debug(f"Obtained tokens: {list(token_data.keys())}")
-    return JSONResponse({"message": "トークン取得成功", "token_data": token_data})
+async def callback(code: str):
+    auth = (CLIENT_ID, CLIENT_SECRET)  # ← タプルで渡す
+    headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    }
+    data = {
+        "client_id": CLIENT_ID,
+        "grant_type": "authorization_code",
+        "redirect_uri": REDIRECT_URI,
+        "code": code,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.fitbit.com/oauth2/token",
+            headers=headers,
+            data=data,
+            auth=auth  # ← ここで渡す
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"認証失敗: {resp.text}")
+
+    token_data = resp.json()
+
+    # JWTを作成
+    jwt_payload = {
+        "access_token": token_data["access_token"],
+        "refresh_token": token_data["refresh_token"],
+        "user_id": token_data["user_id"]
+    }
+    jwt_token = create_jwt_token(jwt_payload)
+
+    # ✅ Streamlit 側にリダイレクト（←絶対これ）
+    return RedirectResponse(url=f"http://localhost:8501/?token={jwt_token}")
+
+
+
 
 # LangGraph スキーマ定義
 from typing import TypedDict
@@ -110,17 +139,21 @@ def build_graph():
 agent = build_graph()
 
 # 3. 診断エンドポイント
-@app.get("/analyze")
-async def analyze():
-    logging.debug("/analyze called")
-    if not os.path.exists(TOKEN_PATH):
-        return JSONResponse(400, {"error": "トークンがありません。まず /callback を実行してください。"})
-    with open(TOKEN_PATH) as f:
-        token = json.load(f)["access_token"]
-    today = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-    state = {"token": token, "date": today, "start_date": start}
-    # 非同期ノード実行
-    result = await agent.ainvoke(state)
-    logging.debug(f"Agent result: {result}")
-    return result
+@app.post("/analyze")
+async def analyze(request: Request):
+    # JWTからアクセストークン取り出して診断実行（例）
+    auth_header = request.headers.get("Authorization")
+    print("✅ Authorization Header:", auth_header)
+
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    
+    token = auth_header.split(" ")[1]
+    user_data = decode_jwt_token(token)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    result = await run_langgraph_analysis(user_data["access_token"])
+    return {"advice": result}
+

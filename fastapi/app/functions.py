@@ -81,25 +81,6 @@ async def fetch_activity_heart_zones(token: str, date: str) -> dict:
     endpoint = f"/1/user/-/activities/heart/date/{date}/1d.json"
     return await fetch_fitbit_data(endpoint, token)
 
-async def fetch_stress(token: str, date: str) -> dict:
-    print("DEBUG:fetch_stress",token)
-    endpoint = f"/1/user/-/stress/date/{date}.json"
-    return await fetch_fitbit_data(endpoint, token)
-
-async def fetch_eda(token: str, date: str) -> dict:
-    print("DEBUG:fetch_eda",token)
-    endpoint = f"/1/user/-/eda/date/{date}.json"
-    return await fetch_fitbit_data(endpoint, token)
-
-async def fetch_spo2(token: str, date: str) -> dict:
-    print("DEBUG:fetch_spo2",token)
-    endpoint = f"/1/user/-/spo2/date/{date}.json"
-    return await fetch_fitbit_data(endpoint, token)
-
-async def fetch_skin_temp(token: str, date: str) -> dict:
-    print("DEBUG:fetch_skin_temp",token)
-    endpoint = f"/1/user/-/temperature/skin/date/{date}.json"
-    return await fetch_fitbit_data(endpoint, token)
 
 # Gemini による診断
 async def generate_llm_response(
@@ -118,10 +99,38 @@ async def gemini_diagnose(data: dict) -> str:
     """
     # 三重引用符とf文字列でJSONを埋め込む
     prompt = f"""
-以下はユーザーの健康データです。睡眠、心拍、運動、ストレス、SpO2、皮膚温度などを
-総合的に判断し、生活改善のためのアドバイスを3点挙げてください。
+以下はユーザーの健康データです。睡眠、運動、心拍数の情報から総合的に判断し、生活改善のためのアドバイスを挙げてください。
 ```json
 {json.dumps(data, ensure_ascii=False, indent=2)}
 ```
 """
     return await generate_llm_response(prompt)
+
+async def run_langgraph_analysis(token: str) -> str:
+    """
+    トークンを使って一連のFitbitデータを取得し、Gemini診断結果を返す
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    start_30_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    # データ収集
+    profile = await fetch_profile(token)
+    sleep_today = await fetch_sleep_date(token, today)
+    sleep_list = await fetch_sleep_list(token, start_30_days_ago, today)
+    heartrate = await fetch_heartrate(token, today)
+    activity = await fetch_activity_date(token, today)
+    heart_zones = await fetch_activity_heart_zones(token, today)
+
+    # まとめる
+    data = {
+        "profile": profile,
+        "sleep_today": sleep_today,
+        "sleep_list": sleep_list,
+        "heartrate": heartrate,
+        "activity": activity,
+        "heart_zones": heart_zones,
+    }
+
+    # Gemini で診断
+    result = await gemini_diagnose(data)
+    return result
