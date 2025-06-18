@@ -14,10 +14,6 @@ token = query_params.get("token", [None])[0]
 if token:
     st.session_state["jwt_token"] = token
 
-# トークン表示（デバッグ用）
-jwt_token = st.session_state.get("jwt_token")
-st.markdown("📦 **JWT Token**: " + (jwt_token if jwt_token else "なし"))
-
 # 1. 認証リンク（別タブで表示）
 if st.button("🔑 Login with Fitbit"):
     st.markdown(
