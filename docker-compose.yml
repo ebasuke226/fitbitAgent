@@ -1,8 +1,28 @@
-version: "3.8"
+version: '3.9'
+
 services:
-  app:
-    build: .
+  fastapi:
+    build: ./fastapi
+    container_name: fastapi
+    ports:
+      - "8080:8080"
     volumes:
-      - .:/code        # ホストの変更を即時反映
-    command: >
-      sh -c "PYTHONPATH=. pytest -q --cov=app --cov-report=term-missing"
+      - ./fastapi:/app
+      - ./fastapi/.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  streamlit:
+    build: ./streamlit
+    container_name: streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit:/app
+    environment:
+      - HOST_URL=http://localhost:8080
+      - API_URL=http://fastapi:8080
+    depends_on:
+      - fastapi
+    restart: unless-stopped

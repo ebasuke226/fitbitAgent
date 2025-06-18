@@ -1,0 +1,14 @@
+fastapi==0.110.1
+uvicorn[standard]==0.29.0
+httpx==0.27.0
+python-dotenv==1.0.1
+genai==0.4.0
+langchain==0.3.16
+langchain-community==0.3.16
+langchain-core==0.3.32
+langchain-text-splitters==0.3.5
+langgraph==0.2.69
+langgraph-checkpoint==2.0.10
+langgraph-sdk==0.1.51
+ipython_genutils==0.2.0
+google-generativeai==0.8.4
