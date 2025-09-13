@@ -1,0 +1,61 @@
+name: ci-ruff
+on: [push, pull_request]
+
+jobs:
+  qa-ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements-dev.txt
+
+      # ---- Format（Black互換）
+      - name: Ruff format (check)
+        run: ruff format --check .
+
+      # ---- Lint + import整列（自動修正が入ったら落とす＝ローカルで直してPR）
+      - name: Ruff check (fix)
+        run: ruff check . --fix --exit-non-zero-on-fix
+
+      # ---- Type check
+      - name: mypy
+        run: mypy .
+
+      # ---- 依存脆弱性スキャン（なければ環境を監査）
+      - name: Dependency audit (pip-audit)
+        run: |
+          pip install pip-audit
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt
+          else
+            pip-audit
+          fi
+
+      # ---- 再現ビルド（wheel生成）
+      - name: Build wheel
+        run: python -m build
+
+      # ---- スモーク（インストールしてimportできるか）
+      - name: Smoke install
+        run: |
+          pip install dist/*.whl
+          python -c "from sample_pkg import __version__; print('import ok:', __version__)"
+
+      # ---- 成果物を保存（後工程/CDやデバッグで使える）
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ github.sha }}
+          path: dist/*.whl

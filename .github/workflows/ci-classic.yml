@@ -1,0 +1,38 @@
+name: ci-classic
+on: [push, pull_request]
+
+jobs:
+  qa-classic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements-dev.txt
+
+      # ---- Formatter（差分があれば失敗）
+      - name: Black (check)
+        run: black --check .
+
+      # ---- import整列（差分があれば失敗）
+      - name: isort (check-only)
+        run: isort --check-only .
+
+      # ---- Lint
+        # Flake8の設定は .flake8 に記載
+      - name: Flake8
+        run: flake8 .
+
+      # ---- Type check
+      - name: mypy
+        run: mypy .

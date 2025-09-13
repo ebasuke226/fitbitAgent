@@ -1,0 +1,71 @@
+name: compare-ruff
+on: [push, pull_request]
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff format (check)
+        id: t_rfmt
+        run: |
+          s=$(date +%s)
+          ruff format --check .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: Ruff check (no-fix)
+        id: t_rlint
+        run: |
+          s=$(date +%s)
+          ruff check .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: mypy
+        id: t_mypy
+        run: |
+          s=$(date +%s)
+          mypy .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: Export timings (summary + artifacts)
+        run: |
+          printf "workflow,sha,ruff_format,ruff_check,mypy\n" > timings.csv
+          printf "ruff,%s,%s,%s,%s\n" \
+            "${GITHUB_SHA}" \
+            "${{ steps.t_rfmt.outputs.duration }}" \
+            "${{ steps.t_rlint.outputs.duration }}" \
+            "${{ steps.t_mypy.outputs.duration }}" >> timings.csv
+
+          jq -n --arg wf "ruff" --arg sha "$GITHUB_SHA" \
+            --argjson rfmt  ${{ steps.t_rfmt.outputs.duration  || 0 }} \
+            --argjson rchk  ${{ steps.t_rlint.outputs.duration || 0 }} \
+            --argjson mypy  ${{ steps.t_mypy.outputs.duration  || 0 }} \
+            '{workflow:$wf, sha:$sha, ruff_format:$rfmt, ruff_check:$rchk, mypy:$mypy}' > timings.json
+
+
+          {
+            echo "### Ruff timings (sec)"
+            echo "- ruff format: ${{ steps.t_rfmt.outputs.duration }}"
+            echo "- ruff check : ${{ steps.t_rlint.outputs.duration }}"
+            echo "- mypy       : ${{ steps.t_mypy.outputs.duration }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruff-timings-${{ github.sha }}
+          path: |
+            timings.csv
+            timings.json

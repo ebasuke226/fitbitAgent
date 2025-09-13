@@ -1,0 +1,81 @@
+name: compare-classic
+on: [push, pull_request]
+
+jobs:
+  classic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements-dev.txt
+
+      - name: Black (check)
+        id: t_black
+        run: |
+          s=$(date +%s)
+          black --check .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: isort (check-only)
+        id: t_isort
+        run: |
+          s=$(date +%s)
+          isort --check-only .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: Flake8
+        id: t_flake8
+        run: |
+          s=$(date +%s)
+          flake8 .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: mypy
+        id: t_mypy
+        run: |
+          s=$(date +%s)
+          mypy .
+          echo "duration=$(( $(date +%s) - s ))" >> $GITHUB_OUTPUT
+
+      - name: Export timings (summary + artifacts)
+        run: |
+          printf "workflow,sha,black,isort,flake8,mypy\n" > timings.csv
+          printf "classic,%s,%s,%s,%s,%s\n" \
+            "${GITHUB_SHA}" \
+            "${{ steps.t_black.outputs.duration }}" \
+            "${{ steps.t_isort.outputs.duration }}" \
+            "${{ steps.t_flake8.outputs.duration }}" \
+            "${{ steps.t_mypy.outputs.duration }}" >> timings.csv
+
+          jq -n --arg wf "classic" --arg sha "$GITHUB_SHA" \
+            --argjson black  ${{ steps.t_black.outputs.duration  || 0 }} \
+            --argjson isort  ${{ steps.t_isort.outputs.duration  || 0 }} \
+            --argjson flake8 ${{ steps.t_flake8.outputs.duration || 0 }} \
+            --argjson mypy   ${{ steps.t_mypy.outputs.duration   || 0 }} \
+            '{workflow:$wf, sha:$sha, black:$black, isort:$isort, flake8:$flake8, mypy:$mypy}' > timings.json
+
+
+          {
+            echo "### Classic timings (sec)"
+            echo "- Black:  ${{ steps.t_black.outputs.duration }}"
+            echo "- isort:  ${{ steps.t_isort.outputs.duration }}"
+            echo "- Flake8: ${{ steps.t_flake8.outputs.duration }}"
+            echo "- mypy:   ${{ steps.t_mypy.outputs.duration }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classic-timings-${{ github.sha }}
+          path: |
+            timings.csv
+            timings.json
